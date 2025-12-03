@@ -502,7 +502,7 @@ class PMCDeviceConfig:
             print(f"Backup created: {backup_file}")
 
         try:
-            self.tree.write(self.pmc_file, encoding='utf-8', xml_declaration=True)
+            self.tree.write(self.pmc_file, encoding='utf-8', xml_declaration=True, short_empty_elements=False)
             print(f"Changes saved to: {self.pmc_file}")
         except Exception as e:
             print(f"Error saving file: {e}")
