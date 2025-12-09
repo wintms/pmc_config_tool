@@ -527,6 +527,85 @@ class PMCDeviceConfig:
 
         return changes
 
+    def interactive_set_masks(self) -> Dict[str, Dict[str, str]]:
+        """
+        Interactive mode to set mask parameters for multiple devices
+
+        Returns:
+            Dictionary mapping device names to their mask changes
+        """
+        print(f"\n{'='*60}")
+        print("Interactive Mask Configuration for Multiple Devices")
+        print(f"{'='*60}")
+
+        # Step 1: Get device names from user
+        print("\nEnter device names (comma-separated or one per line).")
+        print("Press Enter twice when done:")
+        print("-" * 60)
+
+        device_names = []
+        while True:
+            user_input = input("> ").strip()
+            if user_input == "":
+                if device_names:
+                    break
+                continue
+
+            # Support comma-separated input
+            if ',' in user_input:
+                names = [n.strip() for n in user_input.split(',') if n.strip()]
+            else:
+                names = [user_input]
+
+            # Validate each device name
+            for name in names:
+                device = self.get_device_by_name(name)
+                if device is None:
+                    print(f"  Warning: Device '{name}' not found, skipping.")
+                elif name in device_names:
+                    print(f"  Warning: Device '{name}' already added, skipping.")
+                else:
+                    device_names.append(name)
+                    print(f"  Added: {name}")
+
+        if not device_names:
+            print("No valid devices specified.")
+            return {}
+
+        print(f"\n{'='*60}")
+        print(f"Selected {len(device_names)} device(s): {', '.join(device_names)}")
+        print(f"{'='*60}")
+
+        # Step 2: Get mask values from user
+        print("\nEnter mask values (hex format, e.g., 0x3f).")
+        print("Press Enter to skip a mask parameter.")
+        print("-" * 60)
+
+        mask_params = ['LWR_T_MASK', 'UPR_T_MASK', 'S_R_T_MASK']
+        mask_descriptions = {
+            'LWR_T_MASK': 'Lower Threshold Reading Mask',
+            'UPR_T_MASK': 'Upper Threshold Reading Mask',
+            'S_R_T_MASK': 'Settable/Readable Threshold Mask'
+        }
+
+        mask_values = {}
+        for mask_param in mask_params:
+            prompt = f"{mask_param} ({mask_descriptions[mask_param]}): "
+            user_input = input(prompt).strip()
+            if user_input:
+                mask_values[mask_param] = user_input
+
+        if not mask_values:
+            print("No mask values specified.")
+            return {}
+
+        # Build changes dictionary
+        all_changes = {}
+        for dev_name in device_names:
+            all_changes[dev_name] = mask_values.copy()
+
+        return all_changes
+
     def save_file(self, backup: bool = True):
         """
         Save changes back to the PMC file
@@ -708,6 +787,8 @@ def main():
                         help='Set a configuration variable (VARIABLE VALUE)')
     parser.add_argument('--set-thres', action='store_true',
                         help='Interactive mode to set all threshold parameters')
+    parser.add_argument('--set-mask', action='store_true',
+                        help='Interactive mode to set mask parameters (LWR_T_MASK, UPR_T_MASK, S_R_T_MASK) for multiple devices')
     parser.add_argument('--no-backup', action='store_true', help='Do not create backup when saving')
 
     args = parser.parse_args()
@@ -724,8 +805,44 @@ def main():
             print(f"   Dev Name: {device['dev_name']}")
         return
 
+    if args.set_mask:
+        # Interactive mask configuration for multiple devices
+        all_changes = manager.interactive_set_masks()
+
+        if all_changes:
+            print(f"\n{'='*60}")
+            print("Summary of changes to be applied:")
+            print(f"{'='*60}")
+            for dev_name, changes in all_changes.items():
+                print(f"\n  Device: {dev_name}")
+                for var, val in changes.items():
+                    print(f"    {var}: {val}")
+
+            confirm = input("\nApply these changes? (y/N): ").strip().lower()
+            if confirm == 'y':
+                total_success = 0
+                total_changes = 0
+                for dev_name, changes in all_changes.items():
+                    for var, val in changes.items():
+                        total_changes += 1
+                        # Use SDR_ prefix to set SDR config
+                        if manager.set_config_value(dev_name, f"SDR_{var}", val):
+                            total_success += 1
+
+                if total_success == total_changes:
+                    manager.save_file(backup=not args.no_backup)
+                    print(f"\nSuccessfully applied {total_success} changes to {len(all_changes)} device(s)!")
+                else:
+                    print(f"\nWarning: Only {total_success}/{total_changes} changes were applied.")
+                    print("Check errors above.")
+            else:
+                print("\nChanges cancelled.")
+        else:
+            print("\nNo changes to apply.")
+        return
+
     if not args.dev:
-        parser.error("--dev is required (unless using --list)")
+        parser.error("--dev is required (unless using --list or --set-mask)")
 
     if args.get:
         variable = args.get
